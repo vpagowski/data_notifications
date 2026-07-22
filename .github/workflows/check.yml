@@ -1,0 +1,40 @@
+name: Check ERDDAP and alert subscribers
+
+on:
+  schedule:
+    # Every 15 minutes.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}   # lets you click "Run workflow" manually to test
+
+permissions:
+  contents: write   # needed so the workflow can commit the updated state.json
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run check
+        env:
+          ERDDAP_URL: ${{ vars.ERDDAP_URL }}
+          VALUE_COLUMN: ${{ vars.VALUE_COLUMN }}
+          VALUE_LABEL: ${{ vars.VALUE_LABEL }}
+          SIGNUP_SHEET_CSV_URL: ${{ vars.SIGNUP_SHEET_CSV_URL }}
+          SMTP_HOST: ${{ vars.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          SMTP_USER: ${{ vars.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: python check_and_alert.py
+
+      - name: Commit updated state
+        run: |
+          git config user.name "erddap-alert-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state.json
+          git diff --quiet --cached || git commit -m "Update alert state [skip ci]"
+          git push
