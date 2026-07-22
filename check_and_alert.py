@@ -9,9 +9,16 @@ import sys
 from email.mime.text import MIMEText
 from urllib.parse import quote
 from urllib.request import urlopen, Request
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 STATE_FILE = "state.json"
 
+
+def to_pacific(utc_timestamp):
+    dt = datetime.fromisoformat(utc_timestamp.replace("Z", "+00:00"))
+    pacific = dt.astimezone(ZoneInfo("America/Los_Angeles"))
+    return pacific.strftime("%Y-%m-%d %I:%M %p %Z")
 
 def env(name, required=True, default=None):
     val = os.environ.get(name, default)
@@ -134,7 +141,7 @@ def main():
             # Just dropped below threshold -- send one alert, then go quiet.
             body = (
                 f"Alert: {label} is {value} (below your threshold of "
-                f"{sub['threshold']}) as of {timestamp} UTC."
+                f"{sub['threshold']}) as of {to_pacific(timestamp)}."
             )
             send_email(key, f"{label} alert: dropped below threshold", body, smtp_host, smtp_port, smtp_user, smtp_pass)
             alerted[key] = timestamp
@@ -143,7 +150,7 @@ def main():
             # then re-arm so the next dip triggers a fresh alert.
             body = (
                 f"Update: {label} is back up to {value} (above your threshold of "
-                f"{sub['threshold']}) as of {timestamp} UTC."
+                f"{sub['threshold']}) as of {to_pacific(timestamp)}."
             )
             send_email(key, f"{label} alert: back above threshold", body, smtp_host, smtp_port, smtp_user, smtp_pass)
             del alerted[key]
