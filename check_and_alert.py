@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Data notification test code!
+Testing
 """
 
 import csv
@@ -10,6 +10,7 @@ import os
 import smtplib
 import sys
 from email.mime.text import MIMEText
+from urllib.parse import quote
 from urllib.request import urlopen, Request
 
 STATE_FILE = "state.json"
@@ -24,7 +25,9 @@ def env(name, required=True, default=None):
 
 
 def fetch_csv(url):
-    req = Request(url, headers={"User-Agent": "erddap-alert-bot"})
+    #Encoding issues fixer?
+    safe_url = quote(url, safe=":/?&=,%")
+    req = Request(safe_url, headers={"User-Agent": "erddap-alert-bot"})
     with urlopen(req, timeout=30) as resp:
         text = resp.read().decode("utf-8")
     return list(csv.reader(io.StringIO(text)))
@@ -55,8 +58,6 @@ def get_latest_value(erddap_url, value_column):
 
 
 def get_subscribers(sheet_csv_url):
-    """Expects a Google Form CSV
-    """
     rows = fetch_csv(sheet_csv_url)
     if not rows:
         return []
