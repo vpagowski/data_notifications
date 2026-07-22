@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-"""
-Testing
-"""
 
 import csv
 import io
@@ -25,7 +22,7 @@ def env(name, required=True, default=None):
 
 
 def fetch_csv(url):
-    #Encoding issues fixer?
+    #Encoder shenanigans
     safe_url = quote(url, safe=":/?&=,%")
     req = Request(safe_url, headers={"User-Agent": "erddap-alert-bot"})
     with urlopen(req, timeout=30) as resp:
@@ -134,15 +131,23 @@ def main():
         below = value < sub["threshold"]
 
         if below and key not in alerted:
+            # Just dropped below threshold -- send one alert, then go quiet.
             body = (
                 f"Alert: {label} is {value} (below your threshold of "
                 f"{sub['threshold']}) as of {timestamp} UTC."
             )
-            send_email(key, f"{label} alert", body, smtp_host, smtp_port, smtp_user, smtp_pass)
+            send_email(key, f"{label} alert: dropped below threshold", body, smtp_host, smtp_port, smtp_user, smtp_pass)
             alerted[key] = timestamp
         elif not below and key in alerted:
-            # Value recovered -- re-arm so they get a fresh alert next dip.
+            # Just recovered above threshold -- send one recovery notice,
+            # then re-arm so the next dip triggers a fresh alert.
+            body = (
+                f"Update: {label} is back up to {value} (above your threshold of "
+                f"{sub['threshold']}) as of {timestamp} UTC."
+            )
+            send_email(key, f"{label} alert: back above threshold", body, smtp_host, smtp_port, smtp_user, smtp_pass)
             del alerted[key]
+        # else: no state change since the last check -- stay quiet.
 
     save_state(state)
 
