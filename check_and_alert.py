@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-
 import csv
 import io
 import json
 import os
 import smtplib
 import sys
+from datetime import datetime
 from email.mime.text import MIMEText
 from urllib.parse import quote
 from urllib.request import urlopen, Request
-from datetime import datetime
 from zoneinfo import ZoneInfo
 
 STATE_FILE = "state.json"
@@ -20,6 +19,7 @@ def to_pacific(utc_timestamp):
     pacific = dt.astimezone(ZoneInfo("America/Los_Angeles"))
     return pacific.strftime("%Y-%m-%d %I:%M %p %Z")
 
+
 def env(name, required=True, default=None):
     val = os.environ.get(name, default)
     if required and not val:
@@ -29,7 +29,6 @@ def env(name, required=True, default=None):
 
 
 def fetch_csv(url):
-    #Encoder shenanigans
     safe_url = quote(url, safe=":/?&=,%")
     req = Request(safe_url, headers={"User-Agent": "erddap-alert-bot"})
     with urlopen(req, timeout=30) as resp:
@@ -39,7 +38,7 @@ def fetch_csv(url):
 
 def get_latest_value(erddap_url, value_column):
     """ERDDAP CSV format: row0 = column names, row1 = units, row2+ = data,
-    ordered oldest -> newest. We take the last non-empty row."""
+    ordered oldest -> newest. Last non-empty row"""
     rows = fetch_csv(erddap_url)
     if len(rows) < 3:
         raise RuntimeError(f"ERDDAP returned no data rows. Raw response head: {rows[:3]}")
@@ -78,14 +77,15 @@ def get_subscribers(sheet_csv_url):
         if not row:
             continue
         email = col("Email Address", row)
+        station = col("Station", row)
         threshold_raw = col("Alert threshold", row)
-        if not email or not threshold_raw:
+        if not email or not station or not threshold_raw:
             continue
         try:
             threshold = float(threshold_raw)
         except ValueError:
             continue
-        subs.append({"email": email, "threshold": threshold})
+        subs.append({"email": email, "threshold": threshold, "station": station})
     return subs
 
 
@@ -114,7 +114,7 @@ def send_email(to_email, subject, body, smtp_host, smtp_port, smtp_user, smtp_pa
 
 
 def main():
-    erddap_url = env("ERDDAP_URL")
+    stations = json.loads(env("STATIONS_JSON"))   # {"CE42": "https://...", "MB42": "https://..."}
     value_column = env("VALUE_COLUMN")
     sheet_csv_url = env("SIGNUP_SHEET_CSV_URL")
     label = env("VALUE_LABEL", required=False, default=value_column)
@@ -123,38 +123,57 @@ def main():
     smtp_port = int(env("SMTP_PORT", required=False, default="587"))
     smtp_user = env("SMTP_USER")
     smtp_pass = env("SMTP_PASS")
-
-    value, timestamp = get_latest_value(erddap_url, value_column)
-    print(f"Latest {label}: {value} at {timestamp}")
+    force_alert = env("FORCE_ALERT", required=False, default="false").lower() == "true"
+    if force_alert:
+        print("FORCE_ALERT is on: sending regardless of previous alert state (testing mode)")
 
     subscribers = get_subscribers(sheet_csv_url)
     print(f"Loaded {len(subscribers)} subscriber(s)")
 
+    by_station = {}
+    for sub in subscribers:
+        by_station.setdefault(sub["station"], []).append(sub)
+
     state = load_state()
     alerted = state["alerted"]
 
-    for sub in subscribers:
-        key = sub["email"]
-        below = value < sub["threshold"]
+    for station_name, erddap_url in stations.items():
+        station_subs = by_station.get(station_name, [])
+        if not station_subs:
+            continue   # nobody signed up for this station -- skip the fetch
 
-        if below and key not in alerted:
-            # Just dropped below threshold -- send one alert, then go quiet.
-            body = (
-                f"Alert: {label} is {value} (below your threshold of "
-                f"{sub['threshold']}) as of {to_pacific(timestamp)}."
-            )
-            send_email(key, f"{label} alert: dropped below threshold", body, smtp_host, smtp_port, smtp_user, smtp_pass)
-            alerted[key] = timestamp
-        elif not below and key in alerted:
-            # Just recovered above threshold -- send one recovery notice,
-            # then re-arm so the next dip triggers a fresh alert.
-            body = (
-                f"Update: {label} is back up to {value} (above your threshold of "
-                f"{sub['threshold']}) as of {to_pacific(timestamp)}."
-            )
-            send_email(key, f"{label} alert: back above threshold", body, smtp_host, smtp_port, smtp_user, smtp_pass)
-            del alerted[key]
-        # else: no state change since the last check -- stay quiet.
+        try:
+            value, timestamp = get_latest_value(erddap_url, value_column)
+        except Exception as e:
+            print(f"WARNING: failed to fetch {station_name}: {e}")
+            continue
+        print(f"[{station_name}] Latest {label}: {value} at {timestamp}")
+
+        for sub in station_subs:
+            key = f"{station_name}:{sub['email']}"
+            below = value < sub["threshold"]
+            was_alerted = key in alerted
+
+            should_send_drop = below and (force_alert or not was_alerted)
+            should_send_recovery = (not below) and (force_alert or was_alerted)
+
+            if should_send_drop:
+                body = (
+                    f"Alert: {station_name} {label} is {value} (below your "
+                    f"threshold of {sub['threshold']}) as of {to_pacific(timestamp)}."
+                )
+                send_email(sub["email"], f"{station_name} {label} alert: dropped below threshold",
+                           body, smtp_host, smtp_port, smtp_user, smtp_pass)
+                alerted[key] = timestamp
+            elif should_send_recovery:
+                body = (
+                    f"Update: {station_name} {label} is back up to {value} (above "
+                    f"your threshold of {sub['threshold']}) as of {to_pacific(timestamp)}."
+                )
+                send_email(sub["email"], f"{station_name} {label} alert: back above threshold",
+                           body, smtp_host, smtp_port, smtp_user, smtp_pass)
+                if was_alerted:
+                    del alerted[key]
 
     save_state(state)
 
