@@ -21,7 +21,7 @@ jobs:
 
       - name: Run check
         env:
-          ERDDAP_URL: ${{ vars.ERDDAP_URL }}
+          STATIONS_JSON: ${{ vars.STATIONS_JSON }}
           VALUE_COLUMN: ${{ vars.VALUE_COLUMN }}
           VALUE_LABEL: ${{ vars.VALUE_LABEL }}
           SIGNUP_SHEET_CSV_URL: ${{ vars.SIGNUP_SHEET_CSV_URL }}
