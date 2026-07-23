@@ -92,14 +92,16 @@ def parse_dt(ts):
         raise
 
 
-def get_latest_value_depth_csv(url, value_column, depth_value,
+def get_latest_value_depth_csv(url, value_column, depth_value, skip_zero=False,
                                 time_column="Date and Time", depth_column="Depth (Ft)"):
     """For plain (non-ERDDAP) CSVs with a single header row and multiple
     depths per timestamp, e.g.:
         Date and Time, Depth (Ft), Oxygen Conc. (mg/L)
         2026-07-22T08:05:26-0700, -210 ft, 4.452
     Filters to rows matching depth_value exactly (after stripping
-    whitespace) and returns the most recent one by timestamp.
+    whitespace) and returns the most recent one by timestamp. If
+    skip_zero is True, readings of exactly 0 are treated as bad/missing
+    data and skipped in favor of the most recent non-zero reading.
     """
     rows = fetch_csv(url)
     if len(rows) < 2:
@@ -118,19 +120,21 @@ def get_latest_value_depth_csv(url, value_column, depth_value,
         if len(r) > value_idx
         and r[depth_idx].strip() == depth_value
         and r[value_idx].strip() != ""
+        and not (skip_zero and float(r[value_idx].strip()) == 0)
     ]
     if not matches:
-        raise RuntimeError(f"No rows found with depth '{depth_value}'")
+        raise RuntimeError(f"No rows found with depth '{depth_value}'" + (" (excluding zero readings)" if skip_zero else ""))
 
     latest = max(matches, key=lambda r: parse_dt(r[time_idx]))
     return float(latest[value_idx].strip()), latest[time_idx].strip()
 
 
-def get_subscribers(sheet_csv_url):
-    """Expects a Google Form -> Sheet CSV published to the web, with columns
-    (Google's default naming, edit to match your form's exact headers):
-      Timestamp, Email Address, Alert threshold
-    Rows with a missing/invalid email or threshold are skipped.
+def get_subscribers(sheet_csv_url, stations):
+    """Expects a Google Form -> Sheet CSV published to the web, with an
+    'Email Address' column plus one threshold column per station (leaving
+    a station's threshold blank means the person isn't subscribed to it).
+    Each station's config can set "threshold_column" to the exact form
+    question text; otherwise it defaults to "<station> threshold".
     """
     rows = fetch_csv(sheet_csv_url)
     if not rows:
@@ -148,15 +152,18 @@ def get_subscribers(sheet_csv_url):
         if not row:
             continue
         email = col("Email Address", row)
-        station = col("Station", row)
-        threshold_raw = col("Alert threshold", row)
-        if not email or not station or not threshold_raw:
+        if not email:
             continue
-        try:
-            threshold = float(threshold_raw)
-        except ValueError:
-            continue
-        subs.append({"email": email, "threshold": threshold, "station": station})
+        for station_name, cfg in stations.items():
+            threshold_col = cfg.get("threshold_column", f"{station_name} threshold")
+            threshold_raw = col(threshold_col, row)
+            if not threshold_raw:
+                continue   # blank -- not subscribed to this station
+            try:
+                threshold = float(threshold_raw)
+            except ValueError:
+                continue
+            subs.append({"email": email, "threshold": threshold, "station": station_name})
     return subs
 
 
@@ -198,7 +205,7 @@ def main():
     if force_alert:
         print("FORCE_ALERT is on: sending regardless of previous alert state (testing mode)")
 
-    subscribers = get_subscribers(sheet_csv_url)
+    subscribers = get_subscribers(sheet_csv_url, stations)
     print(f"Loaded {len(subscribers)} subscriber(s)")
 
     by_station = {}
@@ -219,7 +226,8 @@ def main():
         try:
             if station_type == "depth_csv":
                 value, timestamp = get_latest_value_depth_csv(
-                    cfg["url"], station_value_column, cfg["depth"]
+                    cfg["url"], station_value_column, cfg["depth"],
+                    skip_zero=cfg.get("skip_zero", False)
                 )
             else:
                 value, timestamp = get_latest_value(cfg["url"], station_value_column)
