@@ -1,16 +1,3 @@
-#!/usr/bin/env python3
-"""
-Checks an ERDDAP dataset for the latest value of a variable, and emails
-any subscriber whose threshold has been crossed.
-
-Run on a schedule (see .github/workflows/check.yml). Designed to be boring
-and safe to re-run often: it only sends a new alert to someone once per
-"episode" (i.e. it won't re-email you every 15 minutes while the value
-stays low -- it waits until the value goes back above your threshold
-before re-arming).
-
-Configuration is via environment variables (see README.md).
-"""
 
 import csv
 import io
@@ -28,8 +15,6 @@ STATE_FILE = "state.json"
 
 
 def to_pacific(utc_timestamp):
-    """Convert an ERDDAP UTC timestamp string (e.g. '2026-07-22T17:49:00Z')
-    to a human-readable Pacific time string. Handles PST/PDT automatically."""
     dt = datetime.fromisoformat(utc_timestamp.replace("Z", "+00:00"))
     pacific = dt.astimezone(ZoneInfo("America/Los_Angeles"))
     return pacific.strftime("%Y-%m-%d %I:%M %p %Z")
@@ -44,11 +29,6 @@ def env(name, required=True, default=None):
 
 
 def fetch_csv(url):
-    # Browsers auto-encode characters like '>' (e.g. in "time>=now-1day")
-    # when a URL is pasted into the address bar, but urllib does not do
-    # this automatically -- so we encode them here. `safe` lists the
-    # characters that are fine to leave as-is (including '%' so we don't
-    # double-encode anything already percent-encoded).
     safe_url = quote(url, safe=":/?&=,%")
     req = Request(safe_url, headers={"User-Agent": "erddap-alert-bot"})
     with urlopen(req, timeout=30) as resp:
@@ -94,14 +74,9 @@ def parse_dt(ts):
 
 def get_latest_value_depth_csv(url, value_column, depth_value, skip_zero=False,
                                 time_column="Date and Time", depth_column="Depth (Ft)"):
-    """For plain (non-ERDDAP) CSVs with a single header row and multiple
-    depths per timestamp, e.g.:
-        Date and Time, Depth (Ft), Oxygen Conc. (mg/L)
-        2026-07-22T08:05:26-0700, -210 ft, 4.452
+    """
     Filters to rows matching depth_value exactly (after stripping
-    whitespace) and returns the most recent one by timestamp. If
-    skip_zero is True, readings of exactly 0 are treated as bad/missing
-    data and skipped in favor of the most recent non-zero reading.
+    whitespace) and returns the most recent one by timestamp. Zeros skipped.
     """
     rows = fetch_csv(url)
     if len(rows) < 2:
@@ -130,12 +105,6 @@ def get_latest_value_depth_csv(url, value_column, depth_value, skip_zero=False,
 
 
 def get_subscribers(sheet_csv_url, stations):
-    """Expects a Google Form -> Sheet CSV published to the web, with an
-    'Email Address' column plus one threshold column per station (leaving
-    a station's threshold blank means the person isn't subscribed to it).
-    Each station's config can set "threshold_column" to the exact form
-    question text; otherwise it defaults to "<station> threshold".
-    """
     rows = fetch_csv(sheet_csv_url)
     if not rows:
         return []
@@ -208,12 +177,28 @@ def main():
     subscribers = get_subscribers(sheet_csv_url, stations)
     print(f"Loaded {len(subscribers)} subscriber(s)")
 
+    state = load_state()
+    alerted = state["alerted"]
+    known_subscriptions = state.setdefault("known_subscriptions", {})
+
+    profiles = {}
+    for sub in subscribers:
+        profiles.setdefault(sub["email"], {})[sub["station"]] = sub["threshold"]
+
+    for email, profile in profiles.items():
+        if known_subscriptions.get(email) != profile:
+            lines = "\n".join(f"  - {station}: {threshold}" for station, threshold in profile.items())
+            body = (
+                f"You're subscribed to {label} alerts for:\n\n{lines}\n\n"
+                f"You'll get an email when a station drops below your threshold, "
+                f"and another when it recovers back above it."
+            )
+            send_email(email, f"{label} data notifications are on!", body, smtp_host, smtp_port, smtp_user, smtp_pass)
+            known_subscriptions[email] = profile
+
     by_station = {}
     for sub in subscribers:
         by_station.setdefault(sub["station"], []).append(sub)
-
-    state = load_state()
-    alerted = state["alerted"]
 
     for station_name, cfg in stations.items():
         station_subs = by_station.get(station_name, [])
