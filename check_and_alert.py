@@ -183,7 +183,7 @@ def main():
         if known_subscriptions.get(email) != profile:
             lines = "\n".join(f"  - {station}: {threshold}" for station, threshold in profile.items())
             body = (
-                f"You're subscribed to {label} DO alerts for:\n\n{lines}\n\n"
+                f"You're subscribed to {label} alerts for:\n\n{lines}\n\n"
                 f"You'll get an email when a station drops below your threshold, "
                 f"and another when it recovers back above it."
             )
@@ -234,7 +234,7 @@ def main():
                 alerted[key] = timestamp
             elif should_send_recovery:
                 body = (
-                    f"Update: {station_name} {label} is back up to {value} (above "
+                    f"Update: {station_name} {label} is now {value} (above "
                     f"your threshold of {sub['threshold']}) as of {to_pacific(timestamp)}."
                 )
                 send_email(sub["email"], f"{station_name} {label} alert: back above threshold",
