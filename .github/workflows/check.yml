@@ -1,14 +1,23 @@
-name: Check ERDDAP and alert subscribers
+name: Send out DO alerts
 
 on:
   schedule:
-    # Every 15 minutes.
     - cron: "*/15 * * * *"
-  workflow_dispatch: {}   # lets you click "Run workflow" manually to test
+  workflow_dispatch:
+    inputs:
+      force_alert:
+        description:
+        required: false
+        default: true
+        type: boolean
 
 permissions:
-  contents: write   # needed so the workflow can commit the updated state.json
+  contents: write   
 
+concurrency:
+  group: erddap-alert-check
+  cancel-in-progress: false 
+  
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -29,6 +38,7 @@ jobs:
           SMTP_PORT: ${{ vars.SMTP_PORT }}
           SMTP_USER: ${{ vars.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          FORCE_ALERT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.force_alert || 'false' }}
         run: python check_and_alert.py
 
       - name: Commit updated state
@@ -37,4 +47,5 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add state.json
           git diff --quiet --cached || git commit -m "Update alert state [skip ci]"
+          git pull --rebase origin main
           git push
