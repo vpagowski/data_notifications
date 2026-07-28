@@ -1,15 +1,4 @@
 {
-  "alerted": {
-    "NEMO:vpagowski@gmail.com": "2026-07-27T08:36:20-0700",
-    "Q2:vpagowski@gmail.com": "2026-07-27T16:00:00Z"
-  },
-  "known_subscriptions": {
-    "vpagowski@gmail.com": {
-      "CE42": 2.0,
-      "MB42": 2.0,
-      "NEMO": 2.0,
-      "Q2": 2.0,
-      "Q3": 3.0
-    }
-  }
+  "alerted": {},
+  "known_subscriptions": {}
 }
