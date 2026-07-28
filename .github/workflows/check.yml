@@ -2,22 +2,22 @@ name: Send out DO alerts
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
       force_alert:
-        description:
+        description: "Send email regardless of previous alert state (testing)"
         required: false
         default: true
         type: boolean
 
 permissions:
-  contents: write   
+  contents: write   # needed so the workflow can commit the updated state.json
 
 concurrency:
   group: erddap-alert-check
-  cancel-in-progress: false 
-  
+  cancel-in-progress: false   # let an in-progress run finish rather than racing it
+
 jobs:
   check:
     runs-on: ubuntu-latest
