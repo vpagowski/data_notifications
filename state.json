@@ -1,5 +1,7 @@
 {
-  "alerted": {},
+  "alerted": {
+    "NEMO:vpagowski@gmail.com": "2026-07-29T08:05:26-0700"
+  },
   "known_subscriptions": {
     "vpagowski@gmail.com": {
       "CE42": 2.0,
