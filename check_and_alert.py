@@ -11,6 +11,7 @@ from email.mime.text import MIMEText
 from urllib.parse import quote, urldefrag
 from urllib.request import urlopen, Request
 from zoneinfo import ZoneInfo
+import math
 
 STATE_FILE = "state.json"
 
@@ -52,7 +53,8 @@ def get_latest_value(erddap_url, value_column):
     col_idx = header.index(value_column)
     time_idx = header.index("time") if "time" in header else 0
 
-    data_rows = [r for r in rows[2:] if len(r) > col_idx and r[col_idx].strip() != ""]
+    data_rows = [r for r in rows[2:] if len(r) > col_idx and r[col_idx].strip() != "" 
+                 and not math.isnan(float(r[col_idx].strip()))]
     if not data_rows:
         raise RuntimeError("No rows with a non-empty value found.")
 
@@ -89,6 +91,7 @@ def get_latest_value_depth_csv(url, value_column, depth_value, skip_zero=False,
         if len(r) > value_idx
         and r[depth_idx].strip() == depth_value
         and r[value_idx].strip() != ""
+        and not math.isnan(float(r[value_idx].strip()))
         and not (skip_zero and float(r[value_idx].strip()) == 0)
     ]
     if not matches:
